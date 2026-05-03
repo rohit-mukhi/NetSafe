@@ -42,6 +42,7 @@ def run_detection(model_name: str) -> dict:
         "anomalies_detected": anomaly_count,
         "normal_count": total - anomaly_count,
         "predictions": predictions,
+        "y_true": y_true,
         "metrics": _compute_metrics(y_true, predictions),
     }
 
@@ -56,6 +57,8 @@ def run_csv_detection(model_name: str, df) -> dict:
         "anomalies_detected": anomaly_count,
         "normal_count": total - anomaly_count,
         "predictions": predictions,
+        "df": df,
+        "y_true": None,
         "metrics": None,
     }
 
@@ -70,6 +73,7 @@ def run_live_detection(model_name: str, duration: int = 10, iface: str = None) -
         "anomalies_detected": anomaly_count,
         "normal_count": total - anomaly_count,
         "predictions": predictions,
+        "y_true": None,
         "metrics": None,
     }
 

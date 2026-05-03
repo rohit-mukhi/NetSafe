@@ -101,7 +101,10 @@ def load_uploaded_csv(df: pd.DataFrame) -> np.ndarray:
 
 
 def capture_live_traffic(duration: int = 10, iface: str = None) -> np.ndarray:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP
+    try:
+        from scapy.all import sniff, IP, TCP, UDP, ICMP
+    except ImportError:
+        raise RuntimeError("Live capture is not available in this environment. Run the app locally with scapy installed.")
 
     packets = sniff(iface=iface, timeout=duration, store=True)
 
