@@ -125,8 +125,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _show_results(result: dict, scan_mode: str, selected_model: str):
-    import plotly.graph_objects as go
-    import plotly.express as px
     import pandas as pd
     from sklearn.metrics import confusion_matrix, roc_curve, auc
 
@@ -166,93 +164,57 @@ def _show_results(result: dict, scan_mode: str, selected_model: str):
     st.divider()
     st.subheader("Visualizations")
 
-    # ── Chart 1: Prediction distribution (all modes) ──────────────────────────
+    # ── Chart 1: Prediction distribution bar chart ────────────────────────────
     col_a, col_b = st.columns(2)
     with col_a:
-        fig_donut = go.Figure(go.Pie(
-            labels=["Normal", "Anomaly"],
-            values=[normal, anomalies],
-            hole=0.5,
-            marker_colors=["#2ecc71", "#e74c3c"],
-        ))
-        fig_donut.update_layout(title="Prediction Distribution", showlegend=True, margin=dict(t=40, b=0))
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.markdown("**Prediction Distribution**")
+        st.bar_chart(pd.DataFrame({"Count": [normal, anomalies]}, index=["Normal", "Anomaly"]))
 
-    # ── Chart 2: Actual vs Predicted bar (dataset mode) / live stats ──────────
+    # ── Chart 2: Actual vs Predicted (dataset) / Threat Score (live+csv) ──────
     with col_b:
         if y_true is not None:
             actual_normal = int((y_true == 1).sum())
             actual_anomaly = int((y_true == -1).sum())
-            fig_bar = go.Figure(data=[
-                go.Bar(name="Actual",    x=["Normal", "Anomaly"], y=[actual_normal, actual_anomaly],    marker_color=["#27ae60", "#c0392b"]),
-                go.Bar(name="Predicted", x=["Normal", "Anomaly"], y=[normal,        anomalies], marker_color=["#2ecc71", "#e74c3c"]),
-            ])
-            fig_bar.update_layout(title="Actual vs Predicted", barmode="group", margin=dict(t=40, b=0))
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.markdown("**Actual vs Predicted**")
+            st.bar_chart(pd.DataFrame({
+                "Actual":    [actual_normal, actual_anomaly],
+                "Predicted": [normal, anomalies],
+            }, index=["Normal", "Anomaly"]))
         else:
             anomaly_rate = anomalies / total
-            threat_score = min(anomaly_rate * 2, 1.0)
-            fig_gauge = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=round(threat_score * 100, 1),
-                number={"suffix": "%"},
-                title={"text": "Threat Score"},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar": {"color": "#e74c3c"},
-                    "steps": [
-                        {"range": [0, 20],  "color": "#2ecc71"},
-                        {"range": [20, 50], "color": "#f39c12"},
-                        {"range": [50, 100],"color": "#e74c3c"},
-                    ],
-                },
-            ))
-            fig_gauge.update_layout(margin=dict(t=40, b=0))
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            threat_score = min(anomaly_rate * 2, 1.0) * 100
+            st.markdown("**Threat Score**")
+            st.metric(label="", value=f"{threat_score:.1f}%",
+                      delta="High Risk" if threat_score > 50 else ("Moderate" if threat_score > 20 else "Low Risk"),
+                      delta_color="inverse")
 
     # ── Chart 3: Confusion matrix (dataset mode only) ─────────────────────────
     if y_true is not None:
         col_c, col_d = st.columns(2)
         with col_c:
             cm = confusion_matrix(y_true, predictions, labels=[1, -1])
-            fig_cm = go.Figure(go.Heatmap(
-                z=cm,
-                x=["Pred Normal", "Pred Anomaly"],
-                y=["Actual Normal", "Actual Anomaly"],
-                colorscale="Reds",
-                text=cm, texttemplate="%{text}",
-                showscale=False,
+            st.markdown("**Confusion Matrix**")
+            st.dataframe(pd.DataFrame(
+                cm,
+                index=["Actual Normal", "Actual Anomaly"],
+                columns=["Pred Normal", "Pred Anomaly"],
             ))
-            fig_cm.update_layout(title="Confusion Matrix", margin=dict(t=40, b=0))
-            st.plotly_chart(fig_cm, use_container_width=True)
 
         # ── Chart 4: ROC Curve ────────────────────────────────────────────────
         with col_d:
             fpr, tpr, _ = roc_curve(y_true, predictions, pos_label=-1)
             roc_auc = auc(fpr, tpr)
-            fig_roc = go.Figure()
-            fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, mode="lines", name=f"AUC = {roc_auc:.3f}", line=dict(color="#e74c3c", width=2)))
-            fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Random", line=dict(color="gray", dash="dash")))
-            fig_roc.update_layout(title="ROC Curve", xaxis_title="False Positive Rate", yaxis_title="True Positive Rate", margin=dict(t=40, b=0))
-            st.plotly_chart(fig_roc, use_container_width=True)
+            st.markdown(f"**ROC Curve** — AUC = {roc_auc:.3f}")
+            st.line_chart(pd.DataFrame({"TPR": tpr, "FPR": fpr}).set_index("FPR"))
 
     # ── Chart 5: Feature distribution (CSV mode only) ────────────────────────
     if scan_mode == "Upload CSV" and result.get("df") is not None:
         df = result["df"].copy()
         df["label"] = ["Anomaly" if p == -1 else "Normal" for p in predictions]
         top_features = ["serror_rate", "src_bytes", "num_failed_logins", "dst_bytes", "rerror_rate", "count"]
-        st.markdown("**Feature Distribution by Predicted Label**")
-        cols = st.columns(3)
-        for i, feat in enumerate(top_features):
-            if feat in df.columns:
-                fig_hist = px.histogram(
-                    df, x=feat, color="label",
-                    color_discrete_map={"Normal": "#2ecc71", "Anomaly": "#e74c3c"},
-                    barmode="overlay", opacity=0.7,
-                    title=feat,
-                )
-                fig_hist.update_layout(showlegend=(i == 0), margin=dict(t=40, b=0))
-                cols[i % 3].plotly_chart(fig_hist, use_container_width=True)
+        st.markdown("**Feature Averages by Predicted Label**")
+        feat_summary = df.groupby("label")[top_features].mean().T
+        st.bar_chart(feat_summary)
 
 
 if scan_clicked:
