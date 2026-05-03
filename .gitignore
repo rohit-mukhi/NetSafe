@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environment
+.venv
+
+# Datasets — never commit raw data
+datasets/
+
+# Captured traffic files
+*.pcap
+*.pcapng
+*.log
+
+# Any loose CSV files (e.g. sample_upload.csv)
+*.csv
+
+# Saved models — all ARE committed (required for deployed app)
+# saved_models/*.pkl   ← keep
+# saved_models/*.h5    ← keep
+# saved_models/*.npy   ← keep (X_test + y_test needed for dataset scan metrics)
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
