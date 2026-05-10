@@ -18,7 +18,7 @@ SAVED_MODELS_DIR.mkdir(exist_ok=True)
 
 def train_isolation_forest(X_train: np.ndarray, y_train: np.ndarray):
     print("Training Isolation Forest...")
-    model = IsolationForest(n_estimators=100, contamination=0.5, random_state=42, n_jobs=-1)
+    model = IsolationForest(n_estimators=100, max_samples=0.5, contamination=0.5, random_state=42, n_jobs=-1)
     model.fit(X_train[y_train == 1])
     with open(SAVED_MODELS_DIR / "isolation_forest.pkl", "wb") as f:
         pickle.dump(model, f)
@@ -27,10 +27,10 @@ def train_isolation_forest(X_train: np.ndarray, y_train: np.ndarray):
 
 def train_one_class_svm(X_train: np.ndarray, y_train: np.ndarray):
     print("Training One-Class SVM...")
-    X_normal = X_train[y_train == 1]
+    X_normal    = X_train[y_train == 1]
     sample_size = min(10_000, len(X_normal))
-    idx = np.random.choice(len(X_normal), sample_size, replace=False)
-    model = OneClassSVM(kernel="rbf", nu=0.1, gamma="scale")
+    idx         = np.random.choice(len(X_normal), sample_size, replace=False)
+    model       = OneClassSVM(kernel="rbf", nu=0.1, gamma="scale")
     model.fit(X_normal[idx])
     with open(SAVED_MODELS_DIR / "one_class_svm.pkl", "wb") as f:
         pickle.dump(model, f)
@@ -54,19 +54,18 @@ def train_autoencoder(X_train: np.ndarray, y_train: np.ndarray):
     from tensorflow.keras.layers import Input, Dense
     from tensorflow.keras.callbacks import EarlyStopping
 
-    input_dim = X_train.shape[1]
+    input_dim    = X_train.shape[1]
     encoding_dim = max(8, input_dim // 4)
 
-    inputs = Input(shape=(input_dim,))
+    inputs  = Input(shape=(input_dim,))
     encoded = Dense(encoding_dim * 2, activation="relu")(inputs)
-    encoded = Dense(encoding_dim, activation="relu")(encoded)
+    encoded = Dense(encoding_dim,     activation="relu")(encoded)
     decoded = Dense(encoding_dim * 2, activation="relu")(encoded)
-    outputs = Dense(input_dim, activation="linear")(decoded)
+    outputs = Dense(input_dim,        activation="linear")(decoded)
 
     autoencoder = Model(inputs, outputs)
     autoencoder.compile(optimizer="adam", loss="mse")
 
-    # Train only on normal samples
     X_normal = X_train[y_train == 1]
     autoencoder.fit(
         X_normal, X_normal,
@@ -77,10 +76,12 @@ def train_autoencoder(X_train: np.ndarray, y_train: np.ndarray):
         verbose=1,
     )
 
-    # Compute reconstruction error threshold (95th percentile on training data)
-    reconstructions = autoencoder.predict(X_normal, verbose=0)
-    mse = np.mean(np.power(X_normal - reconstructions, 2), axis=1)
-    threshold = np.percentile(mse, 95)
+    # Compute threshold as midpoint between normal and anomaly MSE on training data
+    recon_normal  = autoencoder.predict(X_train[y_train == 1],  verbose=0)
+    recon_anomaly = autoencoder.predict(X_train[y_train == -1], verbose=0)
+    mse_normal  = np.mean(np.power(X_train[y_train == 1]  - recon_normal,  2), axis=1)
+    mse_anomaly = np.mean(np.power(X_train[y_train == -1] - recon_anomaly, 2), axis=1)
+    threshold   = (np.percentile(mse_normal, 50) + np.percentile(mse_anomaly, 50)) / 2
 
     autoencoder.save(SAVED_MODELS_DIR / "autoencoder.h5")
     np.save(SAVED_MODELS_DIR / "autoencoder_threshold.npy", threshold)

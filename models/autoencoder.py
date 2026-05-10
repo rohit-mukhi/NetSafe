@@ -20,8 +20,11 @@ class AutoencoderModel:
     def predict(self, X: np.ndarray) -> np.ndarray:
         reconstructions = self.model.predict(X, verbose=0)
         mse = np.mean(np.power(X - reconstructions, 2), axis=1)
-        # -1 = anomaly (high reconstruction error), 1 = normal
         return np.where(mse > self.threshold, -1, 1)
+
+    def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
+        reconstructions = self.model.predict(X, verbose=0)
+        return np.mean(np.power(X - reconstructions, 2), axis=1)
 
     def save(self):
         self.model.save(MODEL_PATH)

@@ -1,4 +1,5 @@
 import base64
+import numpy as np
 from pathlib import Path
 import streamlit as st
 
@@ -128,19 +129,22 @@ def _show_results(result: dict, scan_mode: str, selected_model: str):
     import pandas as pd
     from sklearn.metrics import confusion_matrix, roc_curve, auc
 
-    predictions = result["predictions"]
-    y_true = result.get("y_true")
-    total = result["total_samples"]
-    anomalies = result["anomalies_detected"]
-    normal = result["normal_count"]
+    predictions    = result["predictions"]
+    y_true         = result.get("y_true")
+    total          = result["total_samples"]
+    anomalies      = result["anomalies_detected"]
+    normal         = result["normal_count"]
+    scores         = result.get("anomaly_scores")
+    inference_time = result.get("inference_time", 0)
 
-    # ── Summary metrics ───────────────────────────────────────────────────────
+    # ── Summary ─────────────────────────────────────────────────────────────────
     st.divider()
     st.subheader("Scan Results")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Samples", total)
     col2.metric("Anomalies Detected", anomalies, delta_color="inverse")
     col3.metric("Normal Traffic", normal)
+    col4.metric("Inference Time", f"{inference_time * 1000:.1f} ms")
 
     threat_pct = anomalies / total * 100
     if threat_pct > 20:
@@ -150,45 +154,41 @@ def _show_results(result: dict, scan_mode: str, selected_model: str):
     else:
         st.success(f"✅ Network looks healthy. Only {threat_pct:.1f}% anomalies detected.")
 
-    # ── Performance metrics (dataset mode only) ───────────────────────────────
+    # ── Performance metrics ───────────────────────────────────────────────────────
     if result["metrics"]:
         st.divider()
         st.subheader("Model Performance Metrics")
         m = result["metrics"]
         mc1, mc2, mc3, mc4 = st.columns(4)
-        mc1.metric("Accuracy", f"{m['accuracy'] * 100:.2f}%")
+        mc1.metric("Accuracy",  f"{m['accuracy']  * 100:.2f}%")
         mc2.metric("Precision", f"{m['precision'] * 100:.2f}%")
-        mc3.metric("Recall", f"{m['recall'] * 100:.2f}%")
-        mc4.metric("F1 Score", f"{m['f1_score'] * 100:.2f}%")
+        mc3.metric("Recall",    f"{m['recall']    * 100:.2f}%")
+        mc4.metric("F1 Score",  f"{m['f1_score']  * 100:.2f}%")
 
     st.divider()
     st.subheader("Visualizations")
 
-    # ── Chart 1: Prediction distribution bar chart ────────────────────────────
+    # ── Row 1: Prediction distribution + Actual vs Predicted / Threat Score ────
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("**Prediction Distribution**")
+        st.markdown("**Anomaly Count**")
         st.bar_chart(pd.DataFrame({"Count": [normal, anomalies]}, index=["Normal", "Anomaly"]))
 
-    # ── Chart 2: Actual vs Predicted (dataset) / Threat Score (live+csv) ──────
     with col_b:
         if y_true is not None:
-            actual_normal = int((y_true == 1).sum())
-            actual_anomaly = int((y_true == -1).sum())
             st.markdown("**Actual vs Predicted**")
             st.bar_chart(pd.DataFrame({
-                "Actual":    [actual_normal, actual_anomaly],
+                "Actual":    [int((y_true == 1).sum()),  int((y_true == -1).sum())],
                 "Predicted": [normal, anomalies],
             }, index=["Normal", "Anomaly"]))
         else:
-            anomaly_rate = anomalies / total
-            threat_score = min(anomaly_rate * 2, 1.0) * 100
+            threat_score = min((anomalies / total) * 2, 1.0) * 100
             st.markdown("**Threat Score**")
             st.metric(label="", value=f"{threat_score:.1f}%",
-                      delta="High Risk" if threat_score > 50 else ("Moderate" if threat_score > 20 else "Low Risk"),
-                      delta_color="inverse")
+                delta="High Risk" if threat_score > 50 else ("Moderate" if threat_score > 20 else "Low Risk"),
+                delta_color="inverse")
 
-    # ── Chart 3: Confusion matrix (dataset mode only) ─────────────────────────
+    # ── Row 2: Confusion matrix + ROC curve (dataset mode only) ───────────────
     if y_true is not None:
         col_c, col_d = st.columns(2)
         with col_c:
@@ -200,21 +200,45 @@ def _show_results(result: dict, scan_mode: str, selected_model: str):
                 columns=["Pred Normal", "Pred Anomaly"],
             ))
 
-        # ── Chart 4: ROC Curve ────────────────────────────────────────────────
         with col_d:
             fpr, tpr, _ = roc_curve(y_true, predictions, pos_label=-1)
             roc_auc = auc(fpr, tpr)
             st.markdown(f"**ROC Curve** — AUC = {roc_auc:.3f}")
-            st.line_chart(pd.DataFrame({"TPR": tpr, "FPR": fpr}).set_index("FPR"))
+            st.line_chart(pd.DataFrame({"TPR (True Positive Rate)": tpr}, index=fpr))
 
-    # ── Chart 5: Feature distribution (CSV mode only) ────────────────────────
+        # ── Row 3: Precision / Recall / F1 bar chart ──────────────────────────
+        m = result["metrics"]
+        st.markdown("**Precision / Recall / F1**")
+        st.bar_chart(pd.DataFrame({
+            "Score": [m["precision"], m["recall"], m["f1_score"]]
+        }, index=["Precision", "Recall", "F1 Score"]))
+
+    # ── Row 4: Anomaly score distribution ─────────────────────────────────
+    if scores is not None:
+        st.markdown("**Anomaly Score Distribution**")
+        sample = min(2000, len(scores))
+        idx    = np.random.choice(len(scores), sample, replace=False)
+        score_df = pd.DataFrame({
+            "Anomaly Score": scores[idx],
+            "Label": ["Anomaly" if predictions[i] == -1 else "Normal" for i in idx],
+        }).sort_values("Anomaly Score")
+        normal_scores  = score_df[score_df["Label"] == "Normal"]["Anomaly Score"]
+        anomaly_scores = score_df[score_df["Label"] == "Anomaly"]["Anomaly Score"]
+        col_e, col_f = st.columns(2)
+        with col_e:
+            st.markdown("*Normal flows*")
+            st.line_chart(normal_scores.reset_index(drop=True))
+        with col_f:
+            st.markdown("*Anomalous flows*")
+            st.line_chart(anomaly_scores.reset_index(drop=True))
+
+    # ── Feature averages (CSV mode only) ──────────────────────────────────
     if scan_mode == "Upload CSV" and result.get("df") is not None:
         df = result["df"].copy()
         df["label"] = ["Anomaly" if p == -1 else "Normal" for p in predictions]
         top_features = ["serror_rate", "src_bytes", "num_failed_logins", "dst_bytes", "rerror_rate", "count"]
         st.markdown("**Feature Averages by Predicted Label**")
-        feat_summary = df.groupby("label")[top_features].mean().T
-        st.bar_chart(feat_summary)
+        st.bar_chart(df.groupby("label")[top_features].mean().T)
 
 
 if scan_clicked:
@@ -223,10 +247,70 @@ if scan_clicked:
             from core.predictor import run_detection
             with st.spinner(f"Running {selected_model} on KDD Cup 99 & IoT-23 datasets..."):
                 result = run_detection(selected_model)
+            _show_results(result, scan_mode, selected_model)
         elif scan_mode == "Live Traffic":
-            from core.predictor import run_live_detection
-            with st.spinner(f"Capturing live traffic for {live_duration}s..."):
-                result = run_live_detection(selected_model, duration=live_duration, iface=live_iface)
+            from core.predictor import run_live_window, _load_model
+            import pandas as pd
+
+            WINDOW = 5  # seconds per capture window
+            n_windows = max(1, live_duration // WINDOW)
+
+            model = _load_model(selected_model)
+
+            st.divider()
+            st.subheader("🖥️ Live Network Monitor")
+            st.caption(f"Capturing {WINDOW}s windows over {live_duration}s total — {n_windows} windows")
+
+            chart_placeholder  = st.empty()
+            status_placeholder = st.empty()
+            metrics_placeholder = st.empty()
+
+            timestamps    = []
+            anomaly_rates = []
+            total_flows   = []
+            total_anomalies = []
+
+            for i in range(n_windows):
+                status_placeholder.info(f"📡 Capturing window {i + 1}/{n_windows}...")
+                window_result = run_live_window(model, iface=live_iface, window=WINDOW)
+
+                t_label = f"+{(i + 1) * WINDOW}s"
+                rate    = window_result["anomalies_detected"] / max(window_result["total_samples"], 1) * 100
+                timestamps.append(t_label)
+                anomaly_rates.append(round(rate, 2))
+                total_flows.append(window_result["total_samples"])
+                total_anomalies.append(window_result["anomalies_detected"])
+
+                chart_df = pd.DataFrame(
+                    {"Anomaly Rate (%)": anomaly_rates},
+                    index=timestamps
+                )
+                chart_placeholder.line_chart(chart_df)
+
+                mc1, mc2, mc3, mc4 = metrics_placeholder.columns(4)
+                mc1.metric("Window",            f"{i + 1}/{n_windows}")
+                mc2.metric("Flows This Window", window_result["total_samples"])
+                mc3.metric("Anomalies",         window_result["anomalies_detected"])
+                mc4.metric("Anomaly Rate",       f"{rate:.1f}%")
+
+            status_placeholder.success(f"✅ Monitoring complete — {n_windows} windows captured.")
+
+            # Final summary
+            avg_rate = sum(anomaly_rates) / len(anomaly_rates)
+            st.divider()
+            st.subheader("Session Summary")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Total Flows",     sum(total_flows))
+            s2.metric("Total Anomalies", sum(total_anomalies))
+            s3.metric("Avg Anomaly Rate", f"{avg_rate:.1f}%")
+            s4.metric("Duration",        f"{live_duration}s")
+
+            if avg_rate > 20:
+                st.error(f"⚠️ High anomaly rate detected: {avg_rate:.1f}% average across session.")
+            elif avg_rate > 5:
+                st.warning(f"🟡 Moderate anomaly rate: {avg_rate:.1f}% average across session.")
+            else:
+                st.success(f"✅ Network looks healthy. {avg_rate:.1f}% average anomaly rate.")
         else:
             if uploaded_df is None:
                 st.error("Please upload a valid CSV file before scanning.")
@@ -234,7 +318,7 @@ if scan_clicked:
             from core.predictor import run_csv_detection
             with st.spinner(f"Running {selected_model} on uploaded CSV..."):
                 result = run_csv_detection(selected_model, uploaded_df)
-        _show_results(result, scan_mode, selected_model)
+            _show_results(result, scan_mode, selected_model)
     except FileNotFoundError as e:
         st.error(str(e))
     except Exception as e:

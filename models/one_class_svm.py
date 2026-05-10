@@ -16,8 +16,10 @@ class OneClassSVMModel:
             self.model = pickle.load(f)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        # Returns 1 for normal, -1 for anomaly
         return self.model.predict(X)
+
+    def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
+        return -self.model.decision_function(X)
 
     def save(self):
         with open(MODEL_PATH, "wb") as f:
