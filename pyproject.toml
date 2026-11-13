@@ -1,0 +1,15 @@
+[project]
+name = "netsafe"
+version = "0.1.0"
+description = "Network Anomaly Detector using Machine Learning"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.37.0",
+    "scikit-learn>=1.4.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "tensorflow>=2.16.0",
+    "keras>=3.0.0",
+    "scapy>=2.7.0",
+]
